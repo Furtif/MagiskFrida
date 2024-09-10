@@ -1,140 +1,140 @@
 #!/user/bin/env python3
-import logging
 import lzma
 import os
-from pathlib import Path
 import shutil
-import threading
 import zipfile
-import concurrent.futures
-import json
 
 import requests
 
-PATH_BASE = Path(__file__).parent.resolve()
-PATH_BASE_MODULE: Path = PATH_BASE.joinpath("base")
-PATH_BUILD: Path = PATH_BASE.joinpath("build")
-PATH_BUILD_TMP: Path = PATH_BUILD.joinpath("tmp")
-PATH_DOWNLOADS: Path = PATH_BASE.joinpath("downloads")
-
-logger = logging.getLogger()
-syslog = logging.StreamHandler()
-formatter = logging.Formatter("%(threadName)s : %(message)s")
-syslog.setFormatter(formatter)
-logger.setLevel(logging.INFO)
-logger.addHandler(syslog)
+PATH_BASE = os.path.abspath(os.path.dirname(__file__))
+PATH_BASE_MODULE = os.path.join(PATH_BASE, "base")
+PATH_BUILDS = os.path.join(PATH_BASE, "builds")
+PATH_DOWNLOADS = os.path.join(PATH_BASE, "downloads")
 
 
-def download_file(url: str, path: Path):
+def traverse_path_to_list(file_list, path):
+    for dp, dn, fn in os.walk(path):
+        for f in fn:
+            if f == "placeholder" or f == ".gitkeep":
+                continue
+            file_list.append(os.path.join(dp, f))
+
+
+def download_file(url, path):
     file_name = url[url.rfind("/") + 1:]
-    logger.info(f"Downloading '{file_name}' to '{path}'")
 
-    if path.exists():
+    print("Downloading '{0}' to '{1}'.".format(file_name, path))
+
+    if os.path.exists(path):
         return
 
     r = requests.get(url, allow_redirects=True)
-    with open(path, "wb") as f:
+    with open(path, 'wb') as f:
         f.write(r.content)
 
-    logger.info("Done")
+    print("Done.")
 
 
-def extract_file(archive_path: Path, dest_path: Path):
-    logger.info(f"Extracting '{archive_path.name}' to '{dest_path.name}'")
+def extract_file(archive_path, dest_path):
+    print("Extracting '{0}' to '{1}'.".format(os.path.basename(archive_path), os.path.basename(dest_path)))
 
     with lzma.open(archive_path) as f:
         file_content = f.read()
-        path = dest_path.parent
+        path = os.path.dirname(dest_path)
 
-        path.mkdir(parents=True, exist_ok=True)
+        if not os.path.exists(path):
+            os.makedirs(path)
 
         with open(dest_path, "wb") as out:
             out.write(file_content)
 
 
-def create_module_prop(path: Path, project_tag: str):
-    module_prop = f"""id=magisk-frida
+def create_module_prop(path, frida_release):
+    # Create module.prop file.
+    module_prop = """id=magiskfrida
 name=MagiskFrida
-version={project_tag}
-versionCode={project_tag.replace(".", "").replace("-", "")}
-author=ViRb3 & enovella
-description=Run frida-server on boot
-updateJson=https://github.com/ViRb3/magisk-frida/releases/latest/download/updater.json"""
+version=v{0}
+versionCode={1}
+author=AeonLucid
+description=Runs frida-server on boot as root with magisk.
+support=https://github.com/AeonLucid/MagiskFrida/issues
+minMagisk=1530""".format(frida_release, frida_release.replace(".", ""))
 
-    with open(path.joinpath("module.prop"), "w", newline="\n") as f:
+    with open(os.path.join(path, "module.prop"), "w", newline='\n') as f:
         f.write(module_prop)
 
 
-def create_module(project_tag: str):
-    logger.info("Creating module")
+def create_module(platform, frida_release):
+    # Create directory.
+    module_dir = os.path.join(PATH_BUILDS, platform)
+    module_zip = os.path.join(PATH_BUILDS, "MagiskFrida-{0}-{1}.zip".format(frida_release, platform))
 
-    if PATH_BUILD_TMP.exists():
-        shutil.rmtree(PATH_BUILD_TMP)
+    if os.path.exists(module_dir):
+        shutil.rmtree(module_dir)
 
-    shutil.copytree(PATH_BASE_MODULE, PATH_BUILD_TMP)
-    create_module_prop(PATH_BUILD_TMP, project_tag)
+    if os.path.exists(module_zip):
+        os.remove(module_zip)
 
+    # Copy base module into module dir.
+    shutil.copytree(PATH_BASE_MODULE, module_dir)
 
-def fill_module(arch: str, frida_tag: str, project_tag: str):
-    threading.current_thread().setName(arch)
-    logger.info(f"Filling module for arch '{arch}'")
+    # cd into module directory.
+    os.chdir(module_dir)
 
-    frida_download_url = f"https://github.com/frida/frida/releases/download/{frida_tag}/"
-    frida_server = f"frida-server-{frida_tag}-android-{arch}.xz"
-    frida_server_path = PATH_DOWNLOADS.joinpath(frida_server)
+    # Create module.prop.
+    create_module_prop(module_dir, frida_release)
+
+    # Download frida-server archives.
+    frida_download_url = "https://github.com/frida/frida/releases/download/{0}/".format(frida_release)
+    frida_server = "frida-server-{0}-android-{1}.xz".format(frida_release, platform)
+    frida_server_path = os.path.join(PATH_DOWNLOADS, frida_server)
 
     download_file(frida_download_url + frida_server, frida_server_path)
-    files_dir = PATH_BUILD_TMP.joinpath("files")
-    files_dir.mkdir(exist_ok=True)
-    extract_file(frida_server_path, files_dir.joinpath(f"frida-server-{arch}"))
+
+    # Extract frida-server to correct path.
+    extract_file(frida_server_path, os.path.join(module_dir, "system/bin/frida-server"))
+
+    # Create flashable zip.
+    print("Building Magisk module.")
+
+    file_list = ["install.sh", "module.prop"]
+
+    traverse_path_to_list(file_list, "./common")
+    traverse_path_to_list(file_list, "./system")
+    traverse_path_to_list(file_list, "./META-INF")
+
+    with zipfile.ZipFile(module_zip, "w") as zf:
+        for file_name in file_list:
+            path = os.path.join(module_dir, file_name)
+
+            if not os.path.exists(path):
+                print("File {0} does not exist..".format(path))
+                continue
+
+            zf.write(path, arcname=file_name)
 
 
-def create_updater_json(project_tag: str):
-    logger.info("Creating updater.json")
-    
-    updater ={
-        "version": project_tag,
-        "versionCode": int(project_tag.replace(".", "").replace("-", "")),
-        "zipUrl": f"https://github.com/ViRb3/magisk-frida/releases/download/{project_tag}/MagiskFrida-{project_tag}.zip",
-        "changelog": "https://raw.githubusercontent.com/ViRb3/magisk-frida/master/CHANGELOG.md"
-    }
+def main():
+    # Create necessary folders.
+    if not os.path.exists(PATH_DOWNLOADS):
+        os.makedirs(PATH_DOWNLOADS)
 
-    with open(PATH_BUILD.joinpath("updater.json"), "w", newline="\n") as f:
-        f.write(json.dumps(updater, indent = 4))
+    if not os.path.exists(PATH_BUILDS):
+        os.makedirs(PATH_BUILDS)
 
-def package_module(project_tag: str):
-    logger.info("Packaging module")
+    # Fetch frida information.
+    frida_releases_url = "https://api.github.com/repos/frida/frida/releases/latest"
+    frida_releases = requests.get(frida_releases_url).json()
+    frida_release = frida_releases["tag_name"]
 
-    module_zip = PATH_BUILD.joinpath(f"MagiskFrida-{project_tag}.zip")
+    print("Latest frida version is {0}.".format(frida_release))
 
-    with zipfile.ZipFile(module_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for root, _, files in os.walk(PATH_BUILD_TMP):
-            for file_name in files:
-                if file_name == "placeholder" or file_name == ".gitkeep":
-                    continue
-                zf.write(Path(root).joinpath(file_name),
-                         arcname=Path(root).relative_to(PATH_BUILD_TMP).joinpath(file_name))
+    # Create flashable modules.
+    create_module("arm", frida_release)
+    create_module("arm64", frida_release)
 
-    shutil.rmtree(PATH_BUILD_TMP)
+    print("Done.")
 
 
-def do_build(frida_tag: str, project_tag: str):
-    PATH_DOWNLOADS.mkdir(parents=True, exist_ok=True)
-    PATH_BUILD.mkdir(parents=True, exist_ok=True)
-
-    create_module(project_tag)
-
-    archs = ["arm", "arm64", "x86", "x86_64"]
-    executor = concurrent.futures.ProcessPoolExecutor()
-    futures = [executor.submit(fill_module, arch, frida_tag, project_tag)
-               for arch in archs]
-    for future in concurrent.futures.as_completed(futures):
-        if future.exception() is not None:
-            raise future.exception()
-    # TODO: Causes 'OSError: The handle is invalid' in Python 3.7, revert after update
-    # executor.shutdown()
-
-    package_module(project_tag)
-    create_updater_json(project_tag)
-
-    logger.info("Done")
+if __name__ == "__main__":
+    main()
