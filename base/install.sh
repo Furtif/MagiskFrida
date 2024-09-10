@@ -124,7 +124,7 @@ REPLACE="
 print_modname() {
   ui_print " "
   ui_print "    ********************************************"
-  ui_print "    *          Magisk-/KernelSU-Frida          *"
+  ui_print "    *         MagiskFrida by AeonLucid         *"
   ui_print "    ********************************************"
   ui_print " "
 }
@@ -132,43 +132,10 @@ print_modname() {
 # Copy/extract your module files into $MODPATH in on_install.
 
 on_install() {
-  case $ARCH in
-    arm64) F_ARCH=$ARCH;;
-    arm)   F_ARCH=$ARCH;;
-    x64)   F_ARCH=x86_64;;
-    x86)   F_ARCH=$ARCH;;
-    *)     ui_print "Unsupported architecture: $ARCH"; abort;;
-  esac
-
-  ui_print "- Detected architecture: $F_ARCH"
-
-  if [ "$BOOTMODE" ] && [ "$KSU" ]; then
-      ui_print "- Installing from KernelSU app"
-      ui_print "- KernelSU version: $KSU_KERNEL_VER_CODE (kernel) + $KSU_VER_CODE (ksud)"
-      UNZIP="/data/adb/ksu/bin/busybox unzip"
-  elif [ "$BOOTMODE" ] && [ "$APATCH" ]; then
-      ui_print "- Installing from APatch app"
-      ui_print "- APatch version: $APATCH_VER_CODE. Magisk version: $MAGISK_VER_CODE"
-      UNZIP="/data/adb/ap/bin/busybox unzip"
-  elif [ "$BOOTMODE" ] && [ "$MAGISK_VER_CODE" ]; then
-      ui_print "- Installing from Magisk app"
-      ui_print "- Magisk version: $MAGISK_VER_CODE"
-      UNZIP="/data/adb/magisk/busybox unzip"
-  else
-    ui_print "*********************************************************"
-    ui_print "! Install from recovery is not supported"
-    ui_print "! Please install from KernelSU or Magisk app"
-    abort    "*********************************************************"
-fi
-
+  # The following is the default implementation: extract $ZIPFILE/system to $MODPATH
+  # Extend/change the logic to whatever you want
   ui_print "- Extracting module files"
-  F_TARGETDIR="$MODPATH/system/bin"
-  mkdir -p "$F_TARGETDIR"
-  chcon -R u:object_r:system_file:s0 "$F_TARGETDIR"
-  chmod -R 755 "$F_TARGETDIR"
-
-  $UNZIP -qq -o "$ZIPFILE" "files/frida-server-$F_ARCH" -j -d "$F_TARGETDIR"
-  mv "$F_TARGETDIR/frida-server-$F_ARCH" "$F_TARGETDIR/frida-server"
+  unzip -o "$ZIPFILE" 'system/*' -d $MODPATH >&2
 }
 
 # Only some special files require specific permissions
