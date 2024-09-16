@@ -132,6 +132,8 @@ def main():
     # Create flashable modules.
     create_module("arm", frida_release)
     create_module("arm64", frida_release)
+    create_module("x86", frida_release)
+    create_module("x86_64", frida_release)
 
     print("Done.")
 
